@@ -8,11 +8,11 @@
     "start": "npx tsx index.ts"
   },
   "dependencies": {
-    "@doubleword/vercel-ai": "latest",
-    "ai": "^6.0.0"
+    "@doubleword/vercel-ai": "latest"
   },
   "devDependencies": {
-    "tsx": "^4.0.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "ai": "^6.0.165",
+    "tsx": "^4.0.0"
   }
 }
