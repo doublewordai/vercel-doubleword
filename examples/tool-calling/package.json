@@ -1,0 +1,19 @@
+{
+  "name": "tool-calling-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tool-calling agent example using @doubleword/vercel-ai",
+  "scripts": {
+    "start": "npx tsx index.ts"
+  },
+  "dependencies": {
+    "@doubleword/vercel-ai": "latest",
+    "ai": "^4.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "@types/node": "^22.0.0"
+  }
+}
