@@ -9,8 +9,7 @@
  */
 
 import { createDoubleword } from "@doubleword/vercel-ai";
-import { generateText, tool } from "ai";
-import { z } from "zod";
+import { generateText, tool, jsonSchema, stepCountIs } from "ai";
 
 const MODEL = "Qwen/Qwen3-14B-FP8";
 
@@ -19,18 +18,23 @@ const doubleword = createDoubleword();
 const calculator = tool({
   description:
     "Evaluate a basic arithmetic expression. Supports +, -, *, /, **, parentheses, and numbers.",
-  parameters: z.object({
-    expression: z
-      .string()
-      .describe("The arithmetic expression to evaluate, e.g. '137 * 49'"),
+  inputSchema: jsonSchema({
+    type: "object",
+    properties: {
+      expression: {
+        type: "string",
+        description: "The arithmetic expression to evaluate, e.g. '137 * 49'",
+      },
+    },
+    required: ["expression"],
+    additionalProperties: false,
   }),
-  execute: async ({ expression }) => {
+  execute: async ({ expression }: { expression: string }) => {
     // Only allow safe arithmetic characters
     if (!/^[\d\s+\-*/().]+$/.test(expression)) {
       return `error: invalid characters in "${expression}"`;
     }
     try {
-      // Use Function constructor for safe arithmetic evaluation
       const result = new Function(`return (${expression})`)();
       return String(result);
     } catch (e) {
@@ -51,7 +55,7 @@ async function runOne(query: string): Promise<string> {
   const result = await generateText({
     model: doubleword(MODEL),
     tools: { calculator },
-    maxSteps: 5,
+    stopWhen: stepCountIs(5),
     prompt: query,
   });
   return result.text;

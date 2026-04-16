@@ -9,8 +9,7 @@
   },
   "dependencies": {
     "@doubleword/vercel-ai": "latest",
-    "ai": "^4.0.0",
-    "zod": "^3.23.0"
+    "ai": "^6.0.0"
   },
   "devDependencies": {
     "tsx": "^4.0.0",

@@ -5,6 +5,11 @@ export {
 } from "./doubleword-provider.js";
 export { resolveApiKey, resolveBaseURL } from "./credentials.js";
 export { VERSION } from "./version.js";
+export {
+  createDoublewordBatch,
+  type DoublewordBatchProvider,
+  type DoublewordBatchProviderOptions,
+} from "./batch-provider.js";
 
 // Default singleton -- lazily resolved credentials on first use.
 import { createDoubleword } from "./doubleword-provider.js";

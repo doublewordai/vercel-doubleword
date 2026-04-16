@@ -76,14 +76,12 @@ for await (const chunk of stream.textStream) {
 
 ### Tool calling
 
-The provider supports multi-step tool use via `generateText` with `maxSteps`.
-The model decides when to call tools, receives the results, and formulates a
-final answer:
+The provider supports multi-step tool use via `generateText`. The model decides
+when to call tools, receives the results, and formulates a final answer:
 
 ```typescript
 import { createDoubleword } from "@doubleword/vercel-ai";
-import { generateText, tool } from "ai";
-import { z } from "zod";
+import { generateText, tool, jsonSchema, stepCountIs } from "ai";
 
 const doubleword = createDoubleword();
 
@@ -92,24 +90,29 @@ const result = await generateText({
   tools: {
     calculator: tool({
       description: "Evaluate a basic arithmetic expression",
-      parameters: z.object({
-        expression: z.string().describe("The expression to evaluate"),
+      inputSchema: jsonSchema({
+        type: "object",
+        properties: {
+          expression: { type: "string", description: "The expression to evaluate" },
+        },
+        required: ["expression"],
+        additionalProperties: false,
       }),
-      execute: async ({ expression }) => {
+      execute: async ({ expression }: { expression: string }) => {
         return String(new Function(`return (${expression})`)());
       },
     }),
   },
-  maxSteps: 5,
+  stopWhen: stepCountIs(5),
   prompt: "What is 137 * 49?",
 });
 
 console.log(result.text);
 ```
 
-`maxSteps` controls how many model→tool→model round-trips the SDK will run
-before returning. Each step where the model calls a tool automatically feeds
-the result back for the next step.
+`stopWhen: stepCountIs(5)` allows up to 5 model→tool→model round-trips before
+returning. Each step where the model calls a tool automatically feeds the
+result back for the next step.
 
 ## Embeddings
 
@@ -126,6 +129,46 @@ const result = await embed({
 
 console.log(result.embedding.length);
 ```
+
+## Batch pricing with `createDoublewordBatch`
+
+For background workloads where latency is not critical, use the batch provider
+to transparently route requests through the
+[Doubleword Inference API](https://docs.doubleword.ai) Batch API — cutting
+inference costs by up to 90%. Powered by
+[`autobatcher`](https://www.npmjs.com/package/autobatcher) under the hood.
+
+```typescript
+import { createDoublewordBatch } from "@doubleword/vercel-ai";
+import { generateText } from "ai";
+
+const doubleword = createDoublewordBatch({
+  batchWindowSeconds: 2.5,     // don't wait the full 10s to submit
+});
+
+const result = await generateText({
+  model: doubleword("your-model-name"),
+  prompt: "Summarize this document.",
+});
+
+console.log(result.text);
+
+// When done, flush remaining requests and wait for completion
+await doubleword.close();
+```
+
+Concurrent `generateText` calls are automatically collected into batch
+submissions. The interface is identical to the real-time provider — only
+streaming is not supported (batch results return all at once).
+
+### Tuning the batch client
+
+| Option                | Default | Purpose                                                              |
+|-----------------------|---------|----------------------------------------------------------------------|
+| `batchSize`           | `1000`  | Submit a batch when this many requests are queued.                   |
+| `batchWindowSeconds`  | `10`    | Submit after this many seconds even if the size cap is not reached.  |
+| `pollIntervalSeconds` | `5`     | How often to poll for batch completion.                              |
+| `completionWindow`    | `"1h"`  | `"1h"` async inference (default), `"24h"` batch inference for max savings. |
 
 ## Default singleton
 
