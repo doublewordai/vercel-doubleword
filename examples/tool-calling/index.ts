@@ -11,7 +11,7 @@
 import { createDoubleword } from "@doubleword/vercel-ai";
 import { generateText, tool, jsonSchema, stepCountIs } from "ai";
 
-const MODEL = "Qwen/Qwen3-14B-FP8";
+const MODEL = "Qwen/Qwen3.5-397B-A17B-FP8";
 
 const doubleword = createDoubleword();
 

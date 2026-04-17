@@ -1,0 +1,15 @@
+[
+  {
+    "agentId": "root-0",
+    "parentId": null,
+    "depth": 0,
+    "isRoot": true,
+    "topic": "benefits of batch inference",
+    "status": "completed",
+    "findings": "",
+    "sources": [],
+    "iterations": 0,
+    "startedAt": 0.00029079199999998195,
+    "completedAt": 182.70149641700002
+  }
+]

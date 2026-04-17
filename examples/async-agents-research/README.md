@@ -73,7 +73,7 @@ npx tsx index.ts "artificial general intelligence safety"
 To use a different model:
 
 ```bash
-MODEL="Qwen/Qwen3-14B-FP8" npx tsx index.ts "quantum computing"
+MODEL="Qwen/Qwen3.5-397B-A17B-FP8" npx tsx index.ts "quantum computing"
 ```
 
 ## Output

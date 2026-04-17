@@ -27,7 +27,7 @@ import {
 // ---------------------------------------------------------------------------
 
 const TOPIC = process.argv[2] ?? "quantum computing error correction";
-const MODEL = process.env.MODEL ?? "Qwen/Qwen3.5-35B-A3B-FP8";
+const MODEL = process.env.MODEL ?? "Qwen/Qwen3.5-397B-A17B-FP8";
 const MAX_DEPTH = 3;
 const MAX_STEPS = 8;
 const OUTPUT_DIR = join("results", TOPIC.toLowerCase().replace(/\s+/g, "-").slice(0, 50));
