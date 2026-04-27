@@ -1,0 +1,10 @@
+{
+  "topic": "quantum computing error correction",
+  "model": "Qwen/Qwen3.5-397B-A17B-FP8",
+  "totalAgents": 130,
+  "byStatus": {
+    "completed": 130
+  },
+  "maxDepth": 3,
+  "elapsedSeconds": 2637.4286171669996
+}

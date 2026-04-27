@@ -6,6 +6,7 @@ export {
 export { resolveApiKey, resolveBaseURL } from "./credentials.js";
 export { VERSION } from "./version.js";
 export {
+  createDoublewordAsync,
   createDoublewordBatch,
   type DoublewordBatchProvider,
   type DoublewordBatchProviderOptions,

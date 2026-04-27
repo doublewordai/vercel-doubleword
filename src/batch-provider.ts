@@ -1,10 +1,11 @@
 /**
- * Batch provider for the Vercel AI SDK.
+ * Batch and async providers for the Vercel AI SDK.
  *
- * Uses `BatchOpenAI` from the `autobatcher` package to transparently batch
- * inference requests through the Doubleword Batch API. Language model
- * `doGenerate` calls are routed through the batching client instead of making
- * individual HTTP requests. Streaming is not supported in batch mode.
+ * Uses `BatchOpenAI` / `AsyncOpenAI` from the `autobatcher` package to
+ * transparently batch inference requests through the Doubleword Batch /
+ * Async API. Language model `doGenerate` calls are routed through the
+ * batching client instead of making individual HTTP requests. Streaming
+ * is not supported in either mode.
  */
 
 import type {
@@ -14,7 +15,7 @@ import type {
   LanguageModelV3StreamResult,
 } from "@ai-sdk/provider";
 
-import { BatchOpenAI } from "autobatcher";
+import { AsyncOpenAI, BatchOpenAI } from "autobatcher";
 import {
   createDoubleword,
   type DoublewordProvider,
@@ -33,7 +34,14 @@ export interface DoublewordBatchProviderOptions extends DoublewordProviderOption
   batchWindowSeconds?: number;
   /** Seconds between poll ticks when waiting for batch completion (default 5). */
   pollIntervalSeconds?: number;
-  /** Completion window: "1h" for async inference (default), "24h" for batch inference. */
+  /**
+   * Completion window forwarded to autobatcher.
+   * - For `createDoublewordBatch` the underlying client defaults to `"24h"`
+   *   (the deepest-discount batch tier).
+   * - For `createDoublewordAsync` the underlying client defaults to `"1h"`
+   *   (the flex/async tier).
+   * Set explicitly to override either default.
+   */
   completionWindow?: string;
 }
 
@@ -364,6 +372,8 @@ class BatchLanguageModel implements LanguageModelV3 {
 
   private readonly client: BatchOpenAI;
 
+  // `AsyncOpenAI` is a structural subtype of `BatchOpenAI` (it subclasses
+  // BatchOpenAI in the autobatcher package), so this typing covers both modes.
   constructor(inner: LanguageModelV3, client: BatchOpenAI) {
     this.provider = inner.provider;
     this.modelId = inner.modelId;
@@ -394,32 +404,26 @@ class BatchLanguageModel implements LanguageModelV3 {
 // Factory
 // ---------------------------------------------------------------------------
 
-/**
- * Create a Doubleword batch provider instance.
- *
- * Language model calls made through models created by this provider will be
- * queued and submitted as batch jobs via `autobatcher.BatchOpenAI` rather
- * than making individual inference calls.
- *
- * @example
- * ```ts
- * import { createDoublewordBatch } from "@doubleword/vercel-ai";
- * import { generateText } from "ai";
- *
- * const dw = createDoublewordBatch({ completionWindow: "1h" });
- * const results = await Promise.all(
- *   prompts.map((p) => generateText({ model: dw("your-model"), prompt: p }))
- * );
- * await dw.close();
- * ```
- */
-export function createDoublewordBatch(
-  options: DoublewordBatchProviderOptions = {},
+// Shared factory used by both createDoublewordBatch (24h default) and
+// createDoublewordAsync (1h default). The only difference is which autobatcher
+// class is instantiated.
+type AutobatcherClientCtor = new (opts: {
+  apiKey: string;
+  baseURL: string;
+  batchSize?: number;
+  batchWindowSeconds?: number;
+  pollIntervalSeconds?: number;
+  completionWindow?: string;
+}) => BatchOpenAI;
+
+function buildProvider(
+  options: DoublewordBatchProviderOptions,
+  ClientClass: AutobatcherClientCtor,
 ): DoublewordBatchProvider {
   const baseURL = options.baseURL ?? resolveBaseURL();
   const apiKey = options.apiKey ?? resolveApiKey() ?? "";
 
-  const client = new BatchOpenAI({
+  const client = new ClientClass({
     apiKey,
     baseURL,
     batchSize: options.batchSize,
@@ -456,4 +460,61 @@ export function createDoublewordBatch(
   };
 
   return callable as DoublewordBatchProvider;
+}
+
+/**
+ * Create a Doubleword batch provider instance.
+ *
+ * Language model calls made through models created by this provider are
+ * queued and submitted as batch jobs via `autobatcher.BatchOpenAI` rather
+ * than making individual inference calls. Defaults to the **24-hour batch
+ * tier** — the deepest-discount Doubleword pricing.
+ *
+ * For results faster than next-day, use {@link createDoublewordAsync}, which
+ * targets the 1-hour flex tier instead.
+ *
+ * @example
+ * ```ts
+ * import { createDoublewordBatch } from "@doubleword/vercel-ai";
+ * import { generateText } from "ai";
+ *
+ * const dw = createDoublewordBatch();
+ * const results = await Promise.all(
+ *   prompts.map((p) => generateText({ model: dw("your-model"), prompt: p }))
+ * );
+ * await dw.close();
+ * ```
+ */
+export function createDoublewordBatch(
+  options: DoublewordBatchProviderOptions = {},
+): DoublewordBatchProvider {
+  return buildProvider(options, BatchOpenAI);
+}
+
+/**
+ * Create a Doubleword async (flex) provider instance.
+ *
+ * Same machinery as {@link createDoublewordBatch}, but routed through
+ * `autobatcher.AsyncOpenAI` which defaults to the **1-hour flex completion
+ * window**. Use this when batch turnaround (next-day) is too slow but
+ * realtime cost is too high — typical for fan-out workflows that want
+ * results within minutes-to-an-hour at significant cost savings over
+ * realtime inference.
+ *
+ * @example
+ * ```ts
+ * import { createDoublewordAsync } from "@doubleword/vercel-ai";
+ * import { generateText } from "ai";
+ *
+ * const dw = createDoublewordAsync();
+ * const results = await Promise.all(
+ *   prompts.map((p) => generateText({ model: dw("your-model"), prompt: p }))
+ * );
+ * await dw.close();
+ * ```
+ */
+export function createDoublewordAsync(
+  options: DoublewordBatchProviderOptions = {},
+): DoublewordBatchProvider {
+  return buildProvider(options, AsyncOpenAI);
 }

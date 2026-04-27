@@ -138,6 +138,10 @@ to transparently route requests through the
 inference costs by up to 90%. Powered by
 [`autobatcher`](https://www.npmjs.com/package/autobatcher) under the hood.
 
+`createDoublewordBatch` defaults to the **24-hour batch tier** (deepest
+discount). For results within an hour at intermediate cost, use
+[`createDoublewordAsync`](#async-pricing-with-createdoublewordasync) instead.
+
 ```typescript
 import { createDoublewordBatch } from "@doubleword/vercel-ai";
 import { generateText } from "ai";
@@ -168,7 +172,33 @@ streaming is not supported (batch results return all at once).
 | `batchSize`           | `1000`  | Submit a batch when this many requests are queued.                   |
 | `batchWindowSeconds`  | `10`    | Submit after this many seconds even if the size cap is not reached.  |
 | `pollIntervalSeconds` | `5`     | How often to poll for batch completion.                              |
-| `completionWindow`    | `"1h"`  | `"1h"` async inference (default), `"24h"` batch inference for max savings. |
+| `completionWindow`    | `"24h"` | Doubleword completion window. Set to `"1h"` to fall back to flex pricing without switching factory. |
+
+## Async pricing with `createDoublewordAsync`
+
+Identical machinery to `createDoublewordBatch`, but pinned to Doubleword's
+**1-hour async (flex)** tier — between realtime and 24-hour batch on both
+cost and latency. Use this when next-day batch is too slow but realtime is
+too expensive.
+
+```typescript
+import { createDoublewordAsync } from "@doubleword/vercel-ai";
+import { generateText } from "ai";
+
+const doubleword = createDoublewordAsync();
+
+const results = await Promise.all([
+  generateText({ model: doubleword("your-model-name"), prompt: "Summarize chapter 1." }),
+  generateText({ model: doubleword("your-model-name"), prompt: "Summarize chapter 2." }),
+  generateText({ model: doubleword("your-model-name"), prompt: "Summarize chapter 3." }),
+]);
+
+await doubleword.close();
+```
+
+All the tuning knobs above apply unchanged. The only difference from
+`createDoublewordBatch` is that the underlying `autobatcher` client defaults
+to `completionWindow="1h"` rather than `"24h"`.
 
 ## Default singleton
 
