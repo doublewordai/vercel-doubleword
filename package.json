@@ -1,6 +1,6 @@
 {
   "name": "@doubleword/vercel-ai",
-  "version": "0.2.2",
+  "version": "0.3.1",
   "description": "Doubleword provider for the Vercel AI SDK",
   "license": "Apache-2.0",
   "type": "module",
