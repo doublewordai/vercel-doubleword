@@ -130,6 +130,54 @@ const result = await embed({
 console.log(result.embedding.length);
 ```
 
+## Prompt caching
+
+Doubleword reuses a repeated prompt prefix: the first request stores the
+processed prefix and later requests read it back cheaply instead of
+recomputing it. Enable it on the provider to cache the system prefix:
+
+```typescript
+import { createDoubleword } from "@doubleword/vercel-ai";
+import { generateText } from "ai";
+
+const doubleword = createDoubleword({ cache: { ttl: "1h" } });
+
+const { usage } = await generateText({
+  model: doubleword("Qwen/Qwen3.5-397B-A17B-FP8"),
+  system: "…large, stable instructions…", // the ~1024-token floor applies
+  prompt: "What is 2 + 2?",
+});
+
+// Cache activity is reported on usage.inputTokenDetails:
+console.log(usage.inputTokenDetails); // { cacheReadTokens, noCacheTokens, ... }
+```
+
+`ttl` is `"5m"` or `"1h"`, and the cache is left-anchored (a stable prefix
+followed by a changing tail caches well; a changing prefix caches nothing).
+
+To tune a single call, or to cache a different message, pass `cacheControl`
+through `providerOptions` (it overrides the provider default):
+
+```typescript
+await generateText({
+  model: doubleword("Qwen/Qwen3.5-397B-A17B-FP8"),
+  system: "…large, stable instructions…",
+  prompt: "…",
+  providerOptions: {
+    doubleword: { cacheControl: { ttl: "1h", scope: "system" } },
+  },
+});
+```
+
+`scope` selects which messages carry the breakpoint: `"system"` (default),
+`"lastUser"`, or an array of message indices. Pass `cacheControl: false` to
+skip caching for one call.
+
+The same `cache` option and `cacheControl` work on `createDoublewordAsync` and
+`createDoublewordBatch`; within one batch the shared prefix is processed once
+and read by the rest. See [`examples/prompt-caching`](./examples/prompt-caching)
+and the [prompt caching docs](https://docs.doubleword.ai/inference-api/prompt-caching).
+
 ## Batch pricing with `createDoublewordBatch`
 
 For background workloads where latency is not critical, use the batch provider
