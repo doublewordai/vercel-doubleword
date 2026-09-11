@@ -171,9 +171,12 @@ await generateText({
 
 `scope` selects which messages carry the breakpoint: `"system"` (default),
 `"lastUser"`, or an array of message indices. Pass `cacheControl: false` to
-skip caching for one call. See
-[`examples/prompt-caching`](./examples/prompt-caching) and the
-[prompt caching docs](https://docs.doubleword.ai/inference-api/prompt-caching).
+skip caching for one call.
+
+The same `cache` option and `cacheControl` work on `createDoublewordAsync` and
+`createDoublewordBatch`; within one batch the shared prefix is processed once
+and read by the rest. See [`examples/prompt-caching`](./examples/prompt-caching)
+and the [prompt caching docs](https://docs.doubleword.ai/inference-api/prompt-caching).
 
 ## Batch pricing with `createDoublewordBatch`
 

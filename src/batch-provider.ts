@@ -22,6 +22,11 @@ import {
   type DoublewordProviderOptions,
 } from "./doubleword-provider.js";
 import { resolveApiKey, resolveBaseURL } from "./credentials.js";
+import {
+  applyCacheControl,
+  normalizeCacheConfig,
+  type CacheOption,
+} from "./cache.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -371,20 +376,34 @@ class BatchLanguageModel implements LanguageModelV3 {
   readonly supportedUrls: Record<string, RegExp[]>;
 
   private readonly client: BatchOpenAI;
+  private readonly cacheConfig: ReturnType<typeof normalizeCacheConfig>;
 
   // `AsyncOpenAI` is a structural subtype of `BatchOpenAI` (it subclasses
   // BatchOpenAI in the autobatcher package), so this typing covers both modes.
-  constructor(inner: LanguageModelV3, client: BatchOpenAI) {
+  constructor(
+    inner: LanguageModelV3,
+    client: BatchOpenAI,
+    cacheConfig: ReturnType<typeof normalizeCacheConfig>,
+  ) {
     this.provider = inner.provider;
     this.modelId = inner.modelId;
     this.supportedUrls = "then" in inner.supportedUrls ? {} : inner.supportedUrls;
     this.client = client;
+    this.cacheConfig = cacheConfig;
   }
 
   async doGenerate(
     options: LanguageModelV3CallOptions,
   ): Promise<LanguageModelV3GenerateResult> {
     const body = buildRequestBody(this.modelId, options);
+    // Prompt caching: a per-request `providerOptions.doubleword.cacheControl`
+    // overrides the provider-level default.
+    const override = options.providerOptions?.["doubleword"]?.["cacheControl"];
+    const config =
+      override === undefined
+        ? this.cacheConfig
+        : normalizeCacheConfig(override as CacheOption);
+    applyCacheControl(body, config);
     const response = await this.client.chat.completions.create(
       body as unknown as Parameters<typeof this.client.chat.completions.create>[0],
     );
@@ -422,6 +441,7 @@ function buildProvider(
 ): DoublewordBatchProvider {
   const baseURL = options.baseURL ?? resolveBaseURL();
   const apiKey = options.apiKey ?? resolveApiKey() ?? "";
+  const cacheConfig = normalizeCacheConfig(options.cache);
 
   const client = new ClientClass({
     apiKey,
@@ -440,15 +460,19 @@ function buildProvider(
   });
 
   const callable = function (modelId: string): LanguageModelV3 {
-    return new BatchLanguageModel(standardProvider(modelId), client);
+    return new BatchLanguageModel(standardProvider(modelId), client, cacheConfig);
   };
 
   callable.languageModel = function (modelId: string): LanguageModelV3 {
-    return new BatchLanguageModel(standardProvider.languageModel(modelId), client);
+    return new BatchLanguageModel(
+      standardProvider.languageModel(modelId),
+      client,
+      cacheConfig,
+    );
   };
 
   callable.chatModel = function (modelId: string): LanguageModelV3 {
-    return new BatchLanguageModel(standardProvider.chatModel(modelId), client);
+    return new BatchLanguageModel(standardProvider.chatModel(modelId), client, cacheConfig);
   };
 
   // Embeddings pass through directly.
