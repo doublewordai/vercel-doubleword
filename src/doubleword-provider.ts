@@ -14,6 +14,11 @@ import type {
   LanguageModelV3,
 } from "@ai-sdk/provider";
 import { resolveApiKey, resolveBaseURL } from "./credentials.js";
+import {
+  applyCacheControl,
+  normalizeCacheConfig,
+  type CacheOption,
+} from "./cache.js";
 import { VERSION } from "./version.js";
 
 // ---------------------------------------------------------------------------
@@ -37,6 +42,13 @@ export interface DoublewordProviderOptions {
    * Extra headers sent with every request.
    */
   headers?: Record<string, string>;
+
+  /**
+   * Enable Doubleword prompt caching. `true` caches the system prefix for
+   * `1h`; pass `{ ttl, scope }` to tune it. Override or disable it per request
+   * with `providerOptions: { doubleword: { cacheControl } }`.
+   */
+  cache?: CacheOption;
 }
 
 export interface DoublewordProvider {
@@ -98,6 +110,7 @@ export function createDoubleword(
 ): DoublewordProvider {
   const baseURL = options.baseURL ?? resolveBaseURL();
   const apiKey = options.apiKey ?? resolveApiKey();
+  const providerCache = normalizeCacheConfig(options.cache);
 
   const provider = createOpenAICompatible({
     name: "doubleword",
@@ -106,6 +119,19 @@ export function createDoubleword(
     headers: {
       "User-Agent": `@doubleword/vercel-ai/${VERSION}`,
       ...options.headers,
+    },
+    // Inject Doubleword `cache_control` on the outgoing body. A per-request
+    // `providerOptions.doubleword.cacheControl` arrives here as a top-level
+    // `cacheControl` field (unknown keys are spread by the base provider); it
+    // overrides the provider default and is stripped before dispatch.
+    transformRequestBody: (body) => {
+      const override = (body as Record<string, unknown>)["cacheControl"];
+      delete (body as Record<string, unknown>)["cacheControl"];
+      const config =
+        override === undefined
+          ? providerCache
+          : normalizeCacheConfig(override as CacheOption);
+      return applyCacheControl(body, config);
     },
   });
 
