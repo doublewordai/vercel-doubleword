@@ -1,110 +1,51 @@
-/**
- * Prompt caching for @doubleword/vercel-ai.
- *
- * Doubleword serves Anthropic-style prompt caching over its OpenAI-compatible
- * `/chat/completions` endpoint: mark a message content block with
- * `cache_control` and everything up to that mark becomes a reusable prefix
- * (left-anchored, ~1024-token floor, ttl `5m` or `1h`). The base
- * `@ai-sdk/openai-compatible` provider never emits `cache_control`, so this
- * module rewrites the outgoing request body to attach it, driven either by a
- * provider-level default (`createDoubleword({ cache })`) or per request
- * (`providerOptions.doubleword.cacheControl`).
- *
- * Everything here is a pure transform over the already-assembled request body,
- * so it is unit-testable without the network or the SDK.
- */
+// Adds cache_control to the last system message and the latest message of a chat request body.
+// See https://docs.doubleword.ai/inference-api/prompt-caching
 
-export type CacheTTL = "5m" | "1h";
+export type CacheControl = { type: "ephemeral"; ttl?: "5m" | "1h" };
 
-/**
- * Which messages carry the cache breakpoint.
- *
- * - `"system"` (default): the last system message, caching the system prefix.
- * - `"lastUser"`: the last user message.
- * - `number[]`: exact message indices, for full control.
- */
-export type CacheScope = "system" | "lastUser" | number[];
+const MAX_BREAKPOINTS = 4;
 
-export interface CacheConfig {
-  /** Cache lifetime. Defaults to `"1h"`. */
-  ttl?: CacheTTL;
-  /** Which messages to mark. Defaults to `"system"`. */
-  scope?: CacheScope;
+type Part = { type?: string; text?: unknown; cache_control?: unknown };
+type Message = { role?: string; content?: unknown; cache_control?: unknown };
+
+function countMarkers(message: Message): number {
+  const parts = Array.isArray(message.content) ? (message.content as Part[]) : [];
+  const onParts = parts.filter((part) => part?.cache_control != null).length;
+  return onParts + (message.cache_control != null ? 1 : 0);
 }
 
-/** Provider- or request-level cache option: `true` uses the defaults. */
-export type CacheOption = boolean | CacheConfig;
-
-interface ResolvedCacheConfig {
-  ttl: CacheTTL;
-  scope: CacheScope;
-}
-
-/**
- * Normalize a cache option into a concrete config, or `null` when disabled.
- */
-export function normalizeCacheConfig(
-  option: CacheOption | null | undefined,
-): ResolvedCacheConfig | null {
-  if (option === undefined || option === null || option === false) return null;
-  if (option === true) return { ttl: "1h", scope: "system" };
-  return { ttl: option.ttl ?? "1h", scope: option.scope ?? "system" };
-}
-
-type WireMessage = { role?: string; content?: unknown };
-
-function resolveTargets(messages: WireMessage[], scope: CacheScope): number[] {
-  if (Array.isArray(scope)) {
-    return scope.filter((i) => Number.isInteger(i) && i >= 0 && i < messages.length);
+function mark(message: Message, cacheControl: CacheControl): boolean {
+  if (typeof message.content === "string") {
+    if (!message.content) return false;
+    message.content = [{ type: "text", text: message.content, cache_control: { ...cacheControl } }];
+    return true;
   }
-  if (scope === "lastUser") {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i]?.role === "user") return [i];
-    }
-    return [];
-  }
-  // "system": the last system message.
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i]?.role === "system") return [i];
-  }
-  return [];
-}
-
-/**
- * Attach `cache_control` to one message, converting string content to the
- * block form the endpoint expects. A no-op if the message has no text to mark.
- */
-function markMessage(message: WireMessage, ttl: CacheTTL): void {
-  const cacheControl = { type: "ephemeral", ttl };
-  const content = message.content;
-  if (typeof content === "string") {
-    message.content = [{ type: "text", text: content, cache_control: cacheControl }];
-    return;
-  }
-  if (Array.isArray(content)) {
-    for (let i = content.length - 1; i >= 0; i--) {
-      const part = content[i] as { type?: string; cache_control?: unknown } | null;
-      if (part && part.type === "text") {
-        part.cache_control = cacheControl;
-        return;
-      }
+  if (!Array.isArray(message.content)) return false;
+  for (let i = message.content.length - 1; i >= 0; i--) {
+    const part = message.content[i] as Part | null;
+    if (part?.type === "text" && part.text) {
+      part.cache_control = { ...cacheControl };
+      return true;
     }
   }
+  return false;
 }
 
-/**
- * Apply `cache_control` to the request body in place and return it. Safe to
- * call with a `null` config (returns the body untouched).
- */
 export function applyCacheControl<T extends { messages?: unknown }>(
   body: T,
-  config: ResolvedCacheConfig | null,
+  cacheControl: CacheControl | false | undefined,
 ): T {
-  if (!config) return body;
-  const messages = body.messages;
-  if (!Array.isArray(messages)) return body;
-  for (const index of resolveTargets(messages as WireMessage[], config.scope)) {
-    markMessage((messages as WireMessage[])[index], config.ttl);
+  const messages = body.messages as Message[] | undefined;
+  if (!cacheControl || !Array.isArray(messages) || messages.length === 0) return body;
+  let count = 0;
+  let system = -1;
+  messages.forEach((message, i) => {
+    count += countMarkers(message);
+    if (message.role === "system") system = i;
+  });
+  for (const i of new Set([system, messages.length - 1])) {
+    if (count >= MAX_BREAKPOINTS) break;
+    if (i >= 0 && countMarkers(messages[i]) === 0 && mark(messages[i], cacheControl)) count++;
   }
   return body;
 }
