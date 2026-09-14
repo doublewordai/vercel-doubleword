@@ -11,8 +11,13 @@ const ONE_HOUR: CacheControl = { type: "ephemeral", ttl: "1h" };
 const text = (value: string, cache_control?: CacheControl) =>
   cache_control ? { type: "text", text: value, cache_control } : { type: "text", text: value };
 
+const apply = (
+  body: { messages: unknown[]; tools?: unknown[] },
+  cacheControl: CacheControl | false | undefined = EPHEMERAL,
+) => applyCacheControl(body, cacheControl).messages;
+
 test("marks the last system message and the latest message", () => {
-  const body = {
+  const messages = apply({
     messages: [
       { role: "system", content: "intro" },
       { role: "system", content: "stable instructions" },
@@ -20,9 +25,8 @@ test("marks the last system message and the latest message", () => {
       { role: "assistant", content: "answer" },
       { role: "user", content: "follow-up" },
     ],
-  };
-  applyCacheControl(body, EPHEMERAL);
-  assert.deepEqual(body.messages, [
+  });
+  assert.deepEqual(messages, [
     { role: "system", content: "intro" },
     { role: "system", content: [text("stable instructions", EPHEMERAL)] },
     { role: "user", content: "question" },
@@ -32,23 +36,20 @@ test("marks the last system message and the latest message", () => {
 });
 
 test("marks once when the system message is also the latest message", () => {
-  const body = { messages: [{ role: "system", content: "only message" }] };
-  applyCacheControl(body, EPHEMERAL);
-  assert.deepEqual(body.messages, [
+  assert.deepEqual(apply({ messages: [{ role: "system", content: "only message" }] }), [
     { role: "system", content: [text("only message", EPHEMERAL)] },
   ]);
 });
 
 test("marks only the latest message when there is no system message", () => {
-  const body = {
+  const messages = apply({
     messages: [
       { role: "user", content: "hi" },
       { role: "assistant", content: "hello" },
       { role: "tool", tool_call_id: "call_1", content: "42" },
     ],
-  };
-  applyCacheControl(body, EPHEMERAL);
-  assert.deepEqual(body.messages, [
+  });
+  assert.deepEqual(messages, [
     { role: "user", content: "hi" },
     { role: "assistant", content: "hello" },
     { role: "tool", tool_call_id: "call_1", content: [text("42", EPHEMERAL)] },
@@ -56,100 +57,101 @@ test("marks only the latest message when there is no system message", () => {
 });
 
 test("sends no ttl key when ttl is omitted", () => {
-  const body = { messages: [{ role: "user", content: "hi" }] };
-  applyCacheControl(body, { type: "ephemeral" });
+  const messages = apply({ messages: [{ role: "user", content: "hi" }] }, { type: "ephemeral" });
   assert.equal(
-    JSON.stringify(body.messages[0].content),
-    '[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}]',
+    JSON.stringify(messages),
+    '[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}]}]',
   );
 });
 
 test("passes ttl through", () => {
   for (const ttl of ["5m", "1h"] as const) {
-    const body = { messages: [{ role: "user", content: "hi" }] };
-    applyCacheControl(body, { type: "ephemeral", ttl });
-    assert.deepEqual(body.messages[0].content, [text("hi", { type: "ephemeral", ttl })]);
+    const messages = apply({ messages: [{ role: "user", content: "hi" }] }, { type: "ephemeral", ttl });
+    assert.deepEqual(messages, [{ role: "user", content: [text("hi", { type: "ephemeral", ttl })] }]);
   }
 });
 
 test("marks the last text part and skips a target with no text", () => {
   const image = { type: "image_url", image_url: { url: "https://example.com/a.png" } };
-  const body = {
+  const messages = apply({
     messages: [
       { role: "system", content: [text("a"), text("b"), image] },
       { role: "user", content: [image] },
     ],
-  };
-  applyCacheControl(body, EPHEMERAL);
-  assert.deepEqual(body.messages, [
+  });
+  assert.deepEqual(messages, [
     { role: "system", content: [text("a"), text("b", EPHEMERAL), image] },
     { role: "user", content: [image] },
   ]);
-
-  const toolCallOnly = { messages: [{ role: "assistant", content: "" }] };
-  applyCacheControl(toolCallOnly, EPHEMERAL);
-  assert.deepEqual(toolCallOnly.messages, [{ role: "assistant", content: "" }]);
+  assert.deepEqual(apply({ messages: [{ role: "assistant", content: "" }] }), [
+    { role: "assistant", content: "" },
+  ]);
 });
 
 test("leaves messages that already carry a marker untouched", () => {
-  const body = {
+  const messages = apply({
     messages: [
       { role: "system", content: [text("a", ONE_HOUR), text("b")] },
       { role: "user", content: "question" },
     ],
-  };
-  applyCacheControl(body, EPHEMERAL);
-  assert.deepEqual(body.messages, [
+  });
+  assert.deepEqual(messages, [
     { role: "system", content: [text("a", ONE_HOUR), text("b")] },
     { role: "user", content: [text("question", EPHEMERAL)] },
   ]);
-
-  const messageLevel = { messages: [{ role: "user", content: "hi", cache_control: ONE_HOUR }] };
-  applyCacheControl(messageLevel, EPHEMERAL);
-  assert.deepEqual(messageLevel.messages, [{ role: "user", content: "hi", cache_control: ONE_HOUR }]);
 });
 
-test("never exceeds 4 breakpoints and adds the system marker first", () => {
+test("never exceeds 4 breakpoints across tools and messages", () => {
   const marked = (value: string) => ({ role: "user", content: [text(value, ONE_HOUR)] });
+  const tool = (name: string) => ({ type: "function", function: { name }, cache_control: ONE_HOUR });
+  const system = { role: "system", content: "system" };
+  const markedSystem = { role: "system", content: [text("system", EPHEMERAL)] };
+  const latest = { role: "user", content: "latest" };
 
-  const threeMarked = {
-    messages: [
-      { role: "system", content: "system" },
-      marked("1"),
-      marked("2"),
-      marked("3"),
-      { role: "user", content: "latest" },
-    ],
-  };
-  applyCacheControl(threeMarked, EPHEMERAL);
-  assert.deepEqual(threeMarked.messages[0].content, [text("system", EPHEMERAL)]);
-  assert.equal(threeMarked.messages[4].content, "latest");
-
-  const fourMarked = {
-    messages: [
-      { role: "system", content: "system" },
-      marked("1"),
-      marked("2"),
-      marked("3"),
-      marked("4"),
-      { role: "user", content: "latest" },
-    ],
-  };
-  applyCacheControl(fourMarked, EPHEMERAL);
-  assert.equal(fourMarked.messages[0].content, "system");
-  assert.equal(fourMarked.messages[5].content, "latest");
+  assert.deepEqual(apply({ messages: [system, marked("1"), marked("2"), marked("3"), latest] }), [
+    markedSystem,
+    marked("1"),
+    marked("2"),
+    marked("3"),
+    latest,
+  ]);
+  assert.deepEqual(apply({ tools: [tool("a"), tool("b")], messages: [system, marked("1"), latest] }), [
+    markedSystem,
+    marked("1"),
+    latest,
+  ]);
+  const full = [system, marked("1"), latest];
+  assert.deepEqual(apply({ tools: [tool("a"), tool("b"), tool("c")], messages: full }), full);
 });
 
 test("does nothing when caching is off", () => {
-  for (const cacheControl of [undefined, false] as const) {
-    const body = { messages: [{ role: "system", content: "x" }, { role: "user", content: "y" }] };
-    applyCacheControl(body, cacheControl);
-    assert.deepEqual(body.messages, [
-      { role: "system", content: "x" },
-      { role: "user", content: "y" },
-    ]);
-  }
+  const messages = [
+    { role: "system", content: "x" },
+    { role: "user", content: "y" },
+  ];
+  assert.deepEqual(applyCacheControl({ messages }, undefined).messages, messages);
+  assert.deepEqual(applyCacheControl({ messages }, false).messages, messages);
 });
+
+test("does not mutate the input body", () => {
+  const body = {
+    messages: [
+      { role: "system", content: "stable instructions" },
+      { role: "user", content: [text("context"), text("question")] },
+    ],
+  };
+  const before = structuredClone(body);
+  const first = applyCacheControl(body, EPHEMERAL);
+  const second = applyCacheControl(body, EPHEMERAL);
+  assert.deepEqual(body, before);
+  assert.deepEqual(second, first);
+  assert.deepEqual(first.messages, [
+    { role: "system", content: [text("stable instructions", EPHEMERAL)] },
+    { role: "user", content: [text("context"), text("question", EPHEMERAL)] },
+  ]);
+});
+
+type Call = Pick<LanguageModelV3CallOptions, "prompt" | "providerOptions">;
 
 const PROMPT: LanguageModelV3CallOptions["prompt"] = [
   { role: "system", content: "stable instructions" },
@@ -166,55 +168,84 @@ const markedWith = (cacheControl: CacheControl) => [
   { role: "user", content: [text("question", cacheControl)] },
 ];
 
+const COMPLETION = {
+  id: "1",
+  created: 0,
+  model: "m",
+  choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+  usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+};
+
 async function sendWithDoubleword(
   cacheControl: CacheControl | undefined,
-  providerOptions?: LanguageModelV3CallOptions["providerOptions"],
-): Promise<Record<string, unknown>> {
+  calls: Call[],
+): Promise<Array<Record<string, unknown>>> {
   const realFetch = globalThis.fetch;
-  let sent: Record<string, unknown> = {};
+  const sent: Array<Record<string, unknown>> = [];
   globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
-    sent = JSON.parse(String(init?.body));
-    const completion = {
-      id: "1",
-      created: 0,
-      model: "m",
-      choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    };
-    return new Response(JSON.stringify(completion), {
+    sent.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify(COMPLETION), {
       headers: { "content-type": "application/json" },
     });
   };
   try {
-    const doubleword = createDoubleword({ apiKey: "test", baseURL: "http://localhost", cacheControl });
-    await doubleword("m").doGenerate({ prompt: PROMPT, providerOptions });
+    const model = createDoubleword({ apiKey: "test", baseURL: "http://localhost", cacheControl })("m");
+    for (const call of calls) await model.doGenerate(call);
   } finally {
     globalThis.fetch = realFetch;
   }
   return sent;
 }
 
+function assertNoTopLevelCacheControl(bodies: Array<Record<string, unknown>>): void {
+  for (const body of bodies) {
+    assert.equal("cacheControl" in body, false);
+    assert.equal("cache_control" in body, false);
+  }
+}
+
 test("createDoubleword applies the provider-level cacheControl", async () => {
-  const body = await sendWithDoubleword(ONE_HOUR);
-  assert.deepEqual(body.messages, markedWith(ONE_HOUR));
-  assert.equal("cacheControl" in body, false);
-  assert.equal("cache_control" in body, false);
+  const sent = await sendWithDoubleword(ONE_HOUR, [{ prompt: PROMPT }]);
+  assert.deepEqual(sent[0].messages, markedWith(ONE_HOUR));
+  assertNoTopLevelCacheControl(sent);
 });
 
 test("a per-call cacheControl object replaces the provider-level one", async () => {
-  const body = await sendWithDoubleword(ONE_HOUR, {
-    doubleword: { cacheControl: { type: "ephemeral" } },
-  });
-  assert.deepEqual(body.messages, markedWith(EPHEMERAL));
-  assert.equal("cacheControl" in body, false);
-  assert.equal("cache_control" in body, false);
+  const sent = await sendWithDoubleword(ONE_HOUR, [
+    { prompt: PROMPT, providerOptions: { doubleword: { cacheControl: { type: "ephemeral" } } } },
+  ]);
+  assert.deepEqual(sent[0].messages, markedWith(EPHEMERAL));
+  assertNoTopLevelCacheControl(sent);
 });
 
 test("a per-call cacheControl of false skips caching", async () => {
-  const body = await sendWithDoubleword(ONE_HOUR, { doubleword: { cacheControl: false } });
-  assert.deepEqual(body.messages, UNMARKED);
-  assert.equal("cacheControl" in body, false);
-  assert.equal("cache_control" in body, false);
+  const sent = await sendWithDoubleword(ONE_HOUR, [
+    { prompt: PROMPT, providerOptions: { doubleword: { cacheControl: false } } },
+  ]);
+  assert.deepEqual(sent[0].messages, UNMARKED);
+  assertNoTopLevelCacheControl(sent);
+});
+
+test("createDoubleword leaves the caller's prompt unchanged across calls", async () => {
+  const prompt: LanguageModelV3CallOptions["prompt"] = [
+    { role: "system", content: "stable instructions" },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "context" },
+        { type: "text", text: "question" },
+      ],
+    },
+  ];
+  const before = structuredClone(prompt);
+  const sent = await sendWithDoubleword(EPHEMERAL, [{ prompt }, { prompt }]);
+  assert.deepEqual(prompt, before);
+  const expected = [
+    { role: "system", content: [text("stable instructions", EPHEMERAL)] },
+    { role: "user", content: [text("context"), text("question", EPHEMERAL)] },
+  ];
+  assert.deepEqual(sent[0].messages, expected);
+  assert.deepEqual(sent[1].messages, expected);
 });
 
 test("createDoublewordAsync applies cacheControl and the per-call override", async () => {
@@ -226,10 +257,11 @@ test("createDoublewordAsync applies cacheControl and the per-call override", asy
   const model = doubleword("m");
   const sent: Array<Record<string, unknown>> = [];
   const create = async (body: Record<string, unknown>) => {
-    sent.push(body);
+    sent.push(structuredClone(body));
     return { choices: [{ message: { content: "ok" }, finish_reason: "stop" }] };
   };
   (model as unknown as { client: unknown }).client = { chat: { completions: { create } } };
+  const before = structuredClone(PROMPT);
 
   await model.doGenerate({ prompt: PROMPT });
   await model.doGenerate({
@@ -239,12 +271,10 @@ test("createDoublewordAsync applies cacheControl and the per-call override", asy
   await model.doGenerate({ prompt: PROMPT, providerOptions: { doubleword: { cacheControl: false } } });
   await doubleword.close();
 
+  assert.deepEqual(PROMPT, before);
   assert.deepEqual(
     sent.map((body) => body.messages),
     [markedWith(ONE_HOUR), markedWith(EPHEMERAL), UNMARKED],
   );
-  for (const body of sent) {
-    assert.equal("cacheControl" in body, false);
-    assert.equal("cache_control" in body, false);
-  }
+  assertNoTopLevelCacheControl(sent);
 });

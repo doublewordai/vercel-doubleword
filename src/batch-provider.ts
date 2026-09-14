@@ -391,10 +391,9 @@ class BatchLanguageModel implements LanguageModelV3 {
   async doGenerate(
     options: LanguageModelV3CallOptions,
   ): Promise<LanguageModelV3GenerateResult> {
-    const body = buildRequestBody(this.modelId, options);
     const override = options.providerOptions?.["doubleword"]?.["cacheControl"];
-    applyCacheControl(
-      body,
+    const body = applyCacheControl(
+      buildRequestBody(this.modelId, options),
       override === undefined ? this.cacheControl : (override as CacheControl | false),
     );
     const response = await this.client.chat.completions.create(
