@@ -174,8 +174,9 @@ await generateText({
 skip caching for one call.
 
 The same `cache` option and `cacheControl` work on `createDoublewordAsync` and
-`createDoublewordBatch`; within one batch the shared prefix is processed once
-and read by the rest. See [`examples/prompt-caching`](./examples/prompt-caching)
+`createDoublewordBatch`. Whether requests inside one batch reuse each other's
+prefix depends on the model, and later submissions within the TTL read it back.
+See [`examples/prompt-caching`](./examples/prompt-caching)
 and the [prompt caching docs](https://docs.doubleword.ai/inference-api/prompt-caching).
 
 ## Batch pricing with `createDoublewordBatch`
