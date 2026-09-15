@@ -441,7 +441,7 @@ function buildProvider(
     batchSize: options.batchSize,
     batchWindowSeconds: options.batchWindowSeconds,
     pollIntervalSeconds: options.pollIntervalSeconds,
-    completionWindow: options.completionWindow,
+    ...(options.completionWindow !== undefined ? { completionWindow: options.completionWindow } : {}),
   });
 
   // Standard provider for model metadata and embedding passthrough.
