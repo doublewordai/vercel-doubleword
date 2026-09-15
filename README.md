@@ -24,7 +24,7 @@ Three resolution paths, in precedence order:
    ```bash
    export DOUBLEWORD_API_KEY=sk-...
    ```
-3. **`~/.dw/credentials.toml`** — the same file written by Doubleword's CLI
+3. **`~/.dw/credentials.toml`**: the same file written by Doubleword's CLI
    tooling. The active account is selected by `~/.dw/config.toml`'s
    `active_account` field, and `inference_key` from that account is used.
 
@@ -132,58 +132,41 @@ console.log(result.embedding.length);
 
 ## Prompt caching
 
-Doubleword reuses a repeated prompt prefix: the first request stores the
-processed prefix and later requests read it back cheaply instead of
-recomputing it. Enable it on the provider to cache the system prefix:
-
 ```typescript
 import { createDoubleword } from "@doubleword/vercel-ai";
 import { generateText } from "ai";
 
-const doubleword = createDoubleword({ cache: { ttl: "1h" } });
+const doubleword = createDoubleword({ apiKey, cacheControl: { type: "ephemeral", ttl: "1h" } });
 
 const { usage } = await generateText({
   model: doubleword("Qwen/Qwen3.5-397B-A17B-FP8"),
-  system: "…large, stable instructions…", // the ~1024-token floor applies
+  system: "…long, stable instructions…",
   prompt: "What is 2 + 2?",
 });
 
-// Cache activity is reported on usage.inputTokenDetails:
-console.log(usage.inputTokenDetails); // { cacheReadTokens, noCacheTokens, ... }
+console.log(usage.inputTokenDetails.cacheReadTokens);
 ```
 
-`ttl` is `"5m"` or `"1h"`, and the cache is left-anchored (a stable prefix
-followed by a changing tail caches well; a changing prefix caches nothing).
+`ttl` is `"5m"` or `"1h"`. It is optional and the API default is `"5m"`.
 
-To tune a single call, or to cache a different message, pass `cacheControl`
-through `providerOptions` (it overrides the provider default):
+The provider marks the last system message and the latest message in every
+request.
 
-```typescript
-await generateText({
-  model: doubleword("Qwen/Qwen3.5-397B-A17B-FP8"),
-  system: "…large, stable instructions…",
-  prompt: "…",
-  providerOptions: {
-    doubleword: { cacheControl: { ttl: "1h", scope: "system" } },
-  },
-});
-```
+Override it for one call with `providerOptions: { doubleword: { cacheControl } }`,
+which takes the same object or `false` to skip caching.
 
-`scope` selects which messages carry the breakpoint: `"system"` (default),
-`"lastUser"`, or an array of message indices. Pass `cacheControl: false` to
-skip caching for one call.
+`createDoublewordAsync` and `createDoublewordBatch` take the same option.
+Whether requests inside one batch reuse each other's prefix depends on the
+model, and later submissions within the TTL read it back.
 
-The same `cache` option and `cacheControl` work on `createDoublewordAsync` and
-`createDoublewordBatch`. Whether requests inside one batch reuse each other's
-prefix depends on the model, and later submissions within the TTL read it back.
-See [`examples/prompt-caching`](./examples/prompt-caching)
-and the [prompt caching docs](https://docs.doubleword.ai/inference-api/prompt-caching).
+See [`examples/prompt-caching`](./examples/prompt-caching) and the
+[prompt caching docs](https://docs.doubleword.ai/inference-api/prompt-caching).
 
 ## Batch pricing with `createDoublewordBatch`
 
 For background workloads where latency is not critical, use the batch provider
 to transparently route requests through the
-[Doubleword Inference API](https://docs.doubleword.ai) Batch API — cutting
+[Doubleword Inference API](https://docs.doubleword.ai) Batch API to cut
 inference costs by up to 90%. Powered by
 [`autobatcher`](https://www.npmjs.com/package/autobatcher) under the hood.
 
@@ -211,7 +194,7 @@ await doubleword.close();
 ```
 
 Concurrent `generateText` calls are automatically collected into batch
-submissions. The interface is identical to the real-time provider — only
+submissions. The interface is identical to the real-time provider. Only
 streaming is not supported (batch results return all at once).
 
 ### Tuning the batch client
@@ -226,8 +209,8 @@ streaming is not supported (batch results return all at once).
 ## Async pricing with `createDoublewordAsync`
 
 Identical machinery to `createDoublewordBatch`, but pinned to Doubleword's
-**1-hour async (flex)** tier — between realtime and 24-hour batch on both
-cost and latency. Use this when next-day batch is too slow but realtime is
+**1-hour async (flex)** tier, which sits between realtime and 24-hour batch on
+both cost and latency. Use this when next-day batch is too slow but realtime is
 too expensive.
 
 ```typescript
@@ -270,7 +253,7 @@ const result = await generateText({
 |-----------|----------------------|----------------------------------|
 | `apiKey`  | `DOUBLEWORD_API_KEY` | _required_                       |
 | `baseURL` | `DOUBLEWORD_API_BASE`| `https://api.doubleword.ai/v1`   |
-| `headers` | —                    | `{}`                             |
+| `headers` | -                    | `{}`                             |
 
 The provider is built on top of `@ai-sdk/openai-compatible`, so all standard
 Vercel AI SDK features (`generateText`, `streamText`, `generateObject`,

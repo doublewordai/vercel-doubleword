@@ -4,14 +4,7 @@ export {
   type DoublewordProviderOptions,
 } from "./doubleword-provider.js";
 export { resolveApiKey, resolveBaseURL } from "./credentials.js";
-export {
-  applyCacheControl,
-  normalizeCacheConfig,
-  type CacheOption,
-  type CacheConfig,
-  type CacheScope,
-  type CacheTTL,
-} from "./cache.js";
+export { type CacheControl } from "./cache.js";
 export { VERSION } from "./version.js";
 export {
   createDoublewordAsync,

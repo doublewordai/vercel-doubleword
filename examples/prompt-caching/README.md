@@ -16,29 +16,25 @@ npm start
 Expected output (the warm call reads the cached prefix):
 
 ```
-cold  cache_read=0     fresh=~2000  ->  ...
-warm  cache_read=~2000 fresh=~20    ->  ...
+cold  cache_read=0     fresh=~4100  ->  ...
+warm  cache_read=~4100 fresh=~15    ->  ...
 ```
 
 ## How it works
 
-`createDoubleword({ cache: { ttl: "1h" } })` marks the system prefix with
-`cache_control`. The cache is left-anchored with a ~1024-token floor, and `ttl`
-is `"5m"` or `"1h"`. Cache activity is reported on `usage.inputTokenDetails`
-(`cacheReadTokens`, `noCacheTokens`).
+`createDoubleword({ cacheControl: { type: "ephemeral", ttl: "1h" } })` adds a
+`cache_control` marker to the last system message and the latest message of
+each request. `ttl` is `"5m"` or `"1h"`. It is optional and the API default is
+`"5m"`. Cache reads show up on `usage.inputTokenDetails.cacheReadTokens`.
 
-To cache a different message or tune a single call, use the explicit form:
+Override the marker for one call with the same object, or pass `false` to skip
+caching:
 
 ```ts
 await generateText({
   model,
   system: SYSTEM,
   prompt,
-  providerOptions: {
-    doubleword: { cacheControl: { ttl: "1h", scope: "system" } },
-  },
+  providerOptions: { doubleword: { cacheControl: { type: "ephemeral" } } },
 });
 ```
-
-`scope` is `"system"` (default), `"lastUser"`, or an array of message indices.
-Pass `cacheControl: false` to skip caching for one call.

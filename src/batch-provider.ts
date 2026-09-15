@@ -22,11 +22,7 @@ import {
   type DoublewordProviderOptions,
 } from "./doubleword-provider.js";
 import { resolveApiKey, resolveBaseURL } from "./credentials.js";
-import {
-  applyCacheControl,
-  normalizeCacheConfig,
-  type CacheOption,
-} from "./cache.js";
+import { applyCacheControl, type CacheControl } from "./cache.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -376,34 +372,30 @@ class BatchLanguageModel implements LanguageModelV3 {
   readonly supportedUrls: Record<string, RegExp[]>;
 
   private readonly client: BatchOpenAI;
-  private readonly cacheConfig: ReturnType<typeof normalizeCacheConfig>;
+  private readonly cacheControl: CacheControl | undefined;
 
   // `AsyncOpenAI` is a structural subtype of `BatchOpenAI` (it subclasses
   // BatchOpenAI in the autobatcher package), so this typing covers both modes.
   constructor(
     inner: LanguageModelV3,
     client: BatchOpenAI,
-    cacheConfig: ReturnType<typeof normalizeCacheConfig>,
+    cacheControl: CacheControl | undefined,
   ) {
     this.provider = inner.provider;
     this.modelId = inner.modelId;
     this.supportedUrls = "then" in inner.supportedUrls ? {} : inner.supportedUrls;
     this.client = client;
-    this.cacheConfig = cacheConfig;
+    this.cacheControl = cacheControl;
   }
 
   async doGenerate(
     options: LanguageModelV3CallOptions,
   ): Promise<LanguageModelV3GenerateResult> {
-    const body = buildRequestBody(this.modelId, options);
-    // Prompt caching: a per-request `providerOptions.doubleword.cacheControl`
-    // overrides the provider-level default.
     const override = options.providerOptions?.["doubleword"]?.["cacheControl"];
-    const config =
-      override === undefined
-        ? this.cacheConfig
-        : normalizeCacheConfig(override as CacheOption);
-    applyCacheControl(body, config);
+    const body = applyCacheControl(
+      buildRequestBody(this.modelId, options),
+      override === undefined ? this.cacheControl : (override as CacheControl | false),
+    );
     const response = await this.client.chat.completions.create(
       body as unknown as Parameters<typeof this.client.chat.completions.create>[0],
     );
@@ -441,7 +433,7 @@ function buildProvider(
 ): DoublewordBatchProvider {
   const baseURL = options.baseURL ?? resolveBaseURL();
   const apiKey = options.apiKey ?? resolveApiKey() ?? "";
-  const cacheConfig = normalizeCacheConfig(options.cache);
+  const { cacheControl } = options;
 
   const client = new ClientClass({
     apiKey,
@@ -449,7 +441,7 @@ function buildProvider(
     batchSize: options.batchSize,
     batchWindowSeconds: options.batchWindowSeconds,
     pollIntervalSeconds: options.pollIntervalSeconds,
-    completionWindow: options.completionWindow,
+    ...(options.completionWindow !== undefined ? { completionWindow: options.completionWindow } : {}),
   });
 
   // Standard provider for model metadata and embedding passthrough.
@@ -460,19 +452,19 @@ function buildProvider(
   });
 
   const callable = function (modelId: string): LanguageModelV3 {
-    return new BatchLanguageModel(standardProvider(modelId), client, cacheConfig);
+    return new BatchLanguageModel(standardProvider(modelId), client, cacheControl);
   };
 
   callable.languageModel = function (modelId: string): LanguageModelV3 {
     return new BatchLanguageModel(
       standardProvider.languageModel(modelId),
       client,
-      cacheConfig,
+      cacheControl,
     );
   };
 
   callable.chatModel = function (modelId: string): LanguageModelV3 {
-    return new BatchLanguageModel(standardProvider.chatModel(modelId), client, cacheConfig);
+    return new BatchLanguageModel(standardProvider.chatModel(modelId), client, cacheControl);
   };
 
   // Embeddings pass through directly.
@@ -492,7 +484,7 @@ function buildProvider(
  * Language model calls made through models created by this provider are
  * queued and submitted as batch jobs via `autobatcher.BatchOpenAI` rather
  * than making individual inference calls. Defaults to the **24-hour batch
- * tier** — the deepest-discount Doubleword pricing.
+ * tier**, the deepest-discount Doubleword pricing.
  *
  * For results faster than next-day, use {@link createDoublewordAsync}, which
  * targets the 1-hour flex tier instead.
@@ -521,7 +513,7 @@ export function createDoublewordBatch(
  * Same machinery as {@link createDoublewordBatch}, but routed through
  * `autobatcher.AsyncOpenAI` which defaults to the **1-hour flex completion
  * window**. Use this when batch turnaround (next-day) is too slow but
- * realtime cost is too high — typical for fan-out workflows that want
+ * realtime cost is too high. This is typical for fan-out workflows that want
  * results within minutes-to-an-hour at significant cost savings over
  * realtime inference.
  *
