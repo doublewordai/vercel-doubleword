@@ -7,6 +7,8 @@ on:
 
 jobs:
   publish:
+    # Manual dispatches may only publish from main; releases publish their tag.
+    if: github.event_name == 'release' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
